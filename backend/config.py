@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     debug: bool = False
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    database_url: str = "postgresql://rayovak:rayovak@localhost:5432/rayovak"
 
 
 settings = Settings()
