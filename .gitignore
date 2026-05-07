@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+.venv/
+venv/
+env/
+.env
+*.env
+pip-wheel-metadata/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+.npm
+.yarn/cache
+.yarn/unplugged
+.pnp.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.DS_Store
+.DS_Store
+
+# OS
+Thumbs.db
+Desktop.ini
