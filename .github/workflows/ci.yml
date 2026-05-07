@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check backend
+
+      - name: Test (pytest)
+        run: pytest --tb=short
+
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint (eslint)
+        run: npm run lint --workspace=frontend
+
+      - name: Type check
+        run: cd frontend && npx tsc -p tsconfig.app.json --noEmit
+
+      - name: Test (vitest)
+        run: npm run test --workspace=frontend
+
+      - name: Build
+        run: npm run build --workspace=frontend
