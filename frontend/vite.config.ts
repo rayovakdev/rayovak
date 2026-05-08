@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   optimizeDeps: {
-    exclude: ['@mediapipe/face_mesh', '@mediapipe/hands'],
+    include: ['@mediapipe/face_mesh', '@mediapipe/hands'],
   },
   server: {
     port: 5173,
