@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FaceMesh, FACEMESH_TESSELATION } from '@mediapipe/face_mesh'
-import type { Results, NormalizedLandmark, LandmarkConnectionArray } from '@mediapipe/face_mesh'
+import type { Results as FaceMeshResults } from '@mediapipe/face_mesh'
+import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands'
+import type { Results as HandsResults, NormalizedLandmark } from '@mediapipe/hands'
 
-const MEDIAPIPE_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619'
+const FACE_MESH_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619'
+const HANDS_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240'
 
-function drawTesselation(
+function drawConnections(
   ctx: CanvasRenderingContext2D,
   landmarks: NormalizedLandmark[],
-  connections: LandmarkConnectionArray,
+  connections: Array<[number, number]>,
   w: number,
   h: number,
+  color: string,
+  lineWidth: number,
 ): void {
-  ctx.strokeStyle = 'rgba(0, 200, 100, 0.35)'
-  ctx.lineWidth = 0.5
+  ctx.strokeStyle = color
+  ctx.lineWidth = lineWidth
   for (const [start, end] of connections) {
     const a = landmarks[start]
     const b = landmarks[end]
@@ -27,17 +32,27 @@ export default function LiveMonitor() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const faceMeshRef = useRef<FaceMesh | null>(null)
+  const handsRef = useRef<Hands | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const animFrameRef = useRef<number | null>(null)
   const isProcessingRef = useRef(false)
+  const faceResultsRef = useRef<FaceMeshResults | null>(null)
+  const handResultsRef = useRef<HandsResults | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const onResults = useCallback((results: Results) => {
+  const onFaceResults = useCallback((results: FaceMeshResults) => {
+    faceResultsRef.current = results
+  }, [])
+
+  const onHandResults = useCallback((results: HandsResults) => {
+    handResultsRef.current = results
+  }, [])
+
+  const draw = useCallback(() => {
     const canvas = canvasRef.current
     const video = videoRef.current
     if (!canvas || !video) return
-
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
@@ -45,16 +60,29 @@ export default function LiveMonitor() {
     const h = video.videoHeight
     if (canvas.width !== w) canvas.width = w
     if (canvas.height !== h) canvas.height = h
-
     ctx.clearRect(0, 0, w, h)
 
-    if (results.multiFaceLandmarks) {
-      for (const landmarks of results.multiFaceLandmarks) {
-        drawTesselation(ctx, landmarks, FACEMESH_TESSELATION, w, h)
+    const faceResults = faceResultsRef.current
+    if (faceResults?.multiFaceLandmarks) {
+      for (const landmarks of faceResults.multiFaceLandmarks) {
+        drawConnections(ctx, landmarks, FACEMESH_TESSELATION as Array<[number, number]>, w, h, 'rgba(0, 200, 100, 0.35)', 0.5)
         ctx.fillStyle = 'rgba(255, 50, 50, 0.85)'
         for (const lm of landmarks) {
           ctx.beginPath()
           ctx.arc(lm.x * w, lm.y * h, 1.5, 0, 2 * Math.PI)
+          ctx.fill()
+        }
+      }
+    }
+
+    const handResults = handResultsRef.current
+    if (handResults?.multiHandLandmarks) {
+      for (const landmarks of handResults.multiHandLandmarks) {
+        drawConnections(ctx, landmarks, HAND_CONNECTIONS, w, h, 'rgba(0, 120, 255, 0.7)', 1.5)
+        ctx.fillStyle = 'rgba(0, 210, 255, 0.9)'
+        for (const lm of landmarks) {
+          ctx.beginPath()
+          ctx.arc(lm.x * w, lm.y * h, 3, 0, 2 * Math.PI)
           ctx.fill()
         }
       }
@@ -64,13 +92,16 @@ export default function LiveMonitor() {
   const runLoop = useCallback(async () => {
     const video = videoRef.current
     const faceMesh = faceMeshRef.current
-    if (video && faceMesh && video.readyState >= 2 && !isProcessingRef.current) {
+    const hands = handsRef.current
+    if (video && faceMesh && hands && video.readyState >= 2 && !isProcessingRef.current) {
       isProcessingRef.current = true
       await faceMesh.send({ image: video })
+      await hands.send({ image: video })
+      draw()
       isProcessingRef.current = false
     }
     animFrameRef.current = requestAnimationFrame(runLoop)
-  }, [])
+  }, [draw])
 
   const startCamera = useCallback(async () => {
     setError(null)
@@ -89,7 +120,7 @@ export default function LiveMonitor() {
       await video.play()
 
       const faceMesh = new FaceMesh({
-        locateFile: (file) => `${MEDIAPIPE_CDN}/${file}`,
+        locateFile: (file) => `${FACE_MESH_CDN}/${file}`,
       })
       faceMesh.setOptions({
         maxNumFaces: 1,
@@ -97,16 +128,29 @@ export default function LiveMonitor() {
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5,
       })
-      faceMesh.onResults(onResults)
+      faceMesh.onResults(onFaceResults)
       await faceMesh.initialize()
       faceMeshRef.current = faceMesh
+
+      const hands = new Hands({
+        locateFile: (file) => `${HANDS_CDN}/${file}`,
+      })
+      hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      })
+      hands.onResults(onHandResults)
+      await hands.initialize()
+      handsRef.current = hands
 
       setIsRunning(true)
       animFrameRef.current = requestAnimationFrame(runLoop)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Camera access failed')
     }
-  }, [onResults, runLoop])
+  }, [onFaceResults, onHandResults, runLoop])
 
   const stopCamera = useCallback(() => {
     if (animFrameRef.current !== null) {
@@ -117,6 +161,10 @@ export default function LiveMonitor() {
     streamRef.current = null
     faceMeshRef.current?.close()
     faceMeshRef.current = null
+    handsRef.current?.close()
+    handsRef.current = null
+    faceResultsRef.current = null
+    handResultsRef.current = null
     const video = videoRef.current
     if (video) video.srcObject = null
     const canvas = canvasRef.current
@@ -129,7 +177,7 @@ export default function LiveMonitor() {
   return (
     <div>
       <h1 className="text-2xl font-bold text-gray-900">Live Monitor</h1>
-      <p className="mt-1 text-sm text-gray-500">Real-time facial landmark detection via webcam.</p>
+      <p className="mt-1 text-sm text-gray-500">Real-time facial and hand landmark detection via webcam.</p>
 
       <div className="mt-6">
         <button
