@@ -114,8 +114,8 @@ export default function LiveMonitor() {
       if (handResults?.multiHandLandmarks) {
         for (let i = 0; i < handResults.multiHandLandmarks.length; i++) {
           const label = (handResults as { multiHandedness?: Array<{ label: string }> }).multiHandedness?.[i]?.label
-          if (label === 'Left') leftHandLandmarks = handResults.multiHandLandmarks[i] as unknown as LandmarkPoint[]
-          else if (label === 'Right') rightHandLandmarks = handResults.multiHandLandmarks[i] as unknown as LandmarkPoint[]
+          if (label === 'Left') rightHandLandmarks = handResults.multiHandLandmarks[i] as unknown as LandmarkPoint[]
+          else if (label === 'Right') leftHandLandmarks = handResults.multiHandLandmarks[i] as unknown as LandmarkPoint[]
         }
       }
       pipelineRef.current.process(faceLandmarks, leftHandLandmarks, rightHandLandmarks)
