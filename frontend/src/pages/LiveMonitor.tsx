@@ -3,6 +3,8 @@ import { FaceMesh, FACEMESH_TESSELATION } from '@mediapipe/face_mesh'
 import type { Results as FaceMeshResults } from '@mediapipe/face_mesh'
 import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands'
 import type { Results as HandsResults, NormalizedLandmark } from '@mediapipe/hands'
+import { LandmarkPipeline } from '../video_analysis/landmarkPipeline'
+import type { FrameMetrics, LandmarkPoint } from '../video_analysis/landmarkPipeline'
 
 const FACE_MESH_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619'
 const HANDS_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240'
@@ -38,8 +40,14 @@ export default function LiveMonitor() {
   const isProcessingRef = useRef(false)
   const faceResultsRef = useRef<FaceMeshResults | null>(null)
   const handResultsRef = useRef<HandsResults | null>(null)
+  const pipelineRef = useRef(new LandmarkPipeline())
   const [isRunning, setIsRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [latestMetrics, setLatestMetrics] = useState<FrameMetrics | null>(null)
+
+  useEffect(() => {
+    return pipelineRef.current.subscribe(setLatestMetrics)
+  }, [])
 
   const onFaceResults = useCallback((results: FaceMeshResults) => {
     faceResultsRef.current = results
@@ -98,6 +106,20 @@ export default function LiveMonitor() {
       await faceMesh.send({ image: video })
       await hands.send({ image: video })
       draw()
+
+      const faceLandmarks = (faceResultsRef.current?.multiFaceLandmarks?.[0] as LandmarkPoint[] | undefined) ?? null
+      const handResults = handResultsRef.current
+      let leftHandLandmarks: LandmarkPoint[] | null = null
+      let rightHandLandmarks: LandmarkPoint[] | null = null
+      if (handResults?.multiHandLandmarks) {
+        for (let i = 0; i < handResults.multiHandLandmarks.length; i++) {
+          const label = (handResults as { multiHandedness?: Array<{ label: string }> }).multiHandedness?.[i]?.label
+          if (label === 'Left') leftHandLandmarks = handResults.multiHandLandmarks[i] as unknown as LandmarkPoint[]
+          else if (label === 'Right') rightHandLandmarks = handResults.multiHandLandmarks[i] as unknown as LandmarkPoint[]
+        }
+      }
+      pipelineRef.current.process(faceLandmarks, leftHandLandmarks, rightHandLandmarks)
+
       isProcessingRef.current = false
     }
     animFrameRef.current = requestAnimationFrame(runLoop)
@@ -169,10 +191,14 @@ export default function LiveMonitor() {
     if (video) video.srcObject = null
     const canvas = canvasRef.current
     if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height)
+    pipelineRef.current.reset()
+    setLatestMetrics(null)
     setIsRunning(false)
   }, [])
 
   useEffect(() => stopCamera, [stopCamera])
+
+  const vel = (v: number | undefined) => (v ?? 0).toFixed(4)
 
   return (
     <div>
@@ -200,6 +226,15 @@ export default function LiveMonitor() {
         <video ref={videoRef} className="block" playsInline muted />
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
       </div>
+
+      {isRunning && latestMetrics && (
+        <p className="text-xs text-gray-400 font-mono mt-2">
+          Face vel: {vel(latestMetrics.face?.velocity)}&nbsp;&nbsp;Mouth vel:{' '}
+          {vel(latestMetrics.mouth?.velocity)}&nbsp;&nbsp;L-Hand vel:{' '}
+          {vel(latestMetrics.leftHand?.velocity)}&nbsp;&nbsp;R-Hand vel:{' '}
+          {vel(latestMetrics.rightHand?.velocity)}
+        </p>
+      )}
     </div>
   )
 }
