@@ -5,6 +5,8 @@ import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands'
 import type { Results as HandsResults, NormalizedLandmark } from '@mediapipe/hands'
 import { LandmarkPipeline } from '../video_analysis/landmarkPipeline'
 import type { FrameMetrics, LandmarkPoint } from '../video_analysis/landmarkPipeline'
+import { MouthTicDetector } from '../video_analysis/mouthTicDetector'
+import type { TicEvent } from '../video_analysis/mouthTicDetector'
 
 const FACE_MESH_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619'
 const HANDS_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240'
@@ -41,9 +43,11 @@ export default function LiveMonitor() {
   const faceResultsRef = useRef<FaceMeshResults | null>(null)
   const handResultsRef = useRef<HandsResults | null>(null)
   const pipelineRef = useRef(new LandmarkPipeline())
+  const detectorRef = useRef<MouthTicDetector | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [latestMetrics, setLatestMetrics] = useState<FrameMetrics | null>(null)
+  const [recentTics, setRecentTics] = useState<TicEvent[]>([])
 
   useEffect(() => {
     return pipelineRef.current.subscribe(setLatestMetrics)
@@ -167,6 +171,12 @@ export default function LiveMonitor() {
       await hands.initialize()
       handsRef.current = hands
 
+      const detector = new MouthTicDetector(pipelineRef.current)
+      detector.subscribe((event) => {
+        setRecentTics((prev) => [event, ...prev].slice(0, 5))
+      })
+      detectorRef.current = detector
+
       setIsRunning(true)
       animFrameRef.current = requestAnimationFrame(runLoop)
     } catch (err) {
@@ -191,6 +201,9 @@ export default function LiveMonitor() {
     if (video) video.srcObject = null
     const canvas = canvasRef.current
     if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height)
+    detectorRef.current?.destroy()
+    detectorRef.current = null
+    setRecentTics([])
     pipelineRef.current.reset()
     setLatestMetrics(null)
     setIsRunning(false)
@@ -234,6 +247,23 @@ export default function LiveMonitor() {
           {vel(latestMetrics.leftHand?.velocity)}&nbsp;&nbsp;R-Hand vel:{' '}
           {vel(latestMetrics.rightHand?.velocity)}
         </p>
+      )}
+
+      {isRunning && (
+        <div className="mt-2 text-xs font-mono text-yellow-400">
+          <div>Recent mouth tics:</div>
+          {recentTics.length === 0 ? (
+            <div className="text-gray-500">No tics detected</div>
+          ) : (
+            recentTics.map((t, i) => (
+              <div key={i}>
+                {new Date(t.timestamp).toISOString().slice(11, 23)}
+                {'  '}disp: {t.displacement.toFixed(4)}
+                {'  '}conf: {t.confidence.toFixed(2)}
+              </div>
+            ))
+          )}
+        </div>
       )}
     </div>
   )
