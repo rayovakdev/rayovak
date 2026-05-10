@@ -9,6 +9,8 @@ export interface TicEvent {
 
 type TicListener = (event: TicEvent) => void
 
+const MIN_VELOCITY = 0.005
+
 function computeStats(values: number[]): { mean: number; std: number } {
   if (values.length === 0) return { mean: 0, std: 0 }
   const mean = values.reduce((a, b) => a + b, 0) / values.length
@@ -38,7 +40,7 @@ export class MouthTicDetector {
     const threshold = mean + this.sigmaThreshold * std
 
     if (!this.inCandidate) {
-      if (mouthVelocity > threshold && threshold > 0) {
+      if (mouthVelocity > threshold && threshold > 0 && mouthVelocity > MIN_VELOCITY) {
         this.inCandidate = true
         this.candidateStartTime = metrics.timestamp
         this.peakVelocity = mouthVelocity
