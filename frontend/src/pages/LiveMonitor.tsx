@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createSession, appendEvents, completeSession } from '../api/sessions'
+import type { TicEventPayload } from '../api/sessions'
 import { FaceMesh, FACEMESH_TESSELATION } from '@mediapipe/face_mesh'
 import type { Results as FaceMeshResults } from '@mediapipe/face_mesh'
 import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands'
@@ -47,11 +49,22 @@ export default function LiveMonitor() {
   const pipelineRef = useRef(new LandmarkPipeline())
   const detectorRef = useRef<MouthTicDetector | null>(null)
   const handDetectorRef = useRef<HandTicDetector | null>(null)
+  const isRecordingRef = useRef(false)
+  const sessionIdRef = useRef<string | null>(null)
+  const pendingEventsRef = useRef<TicEventPayload[]>([])
+  const sessionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const flushIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [isRunning, setIsRunning] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [latestMetrics, setLatestMetrics] = useState<FrameMetrics | null>(null)
   const [recentTics, setRecentTics] = useState<TicEvent[]>([])
   const [recentHandTics, setRecentHandTics] = useState<HandTicEvent[]>([])
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording
+  }, [isRecording])
 
   useEffect(() => {
     return pipelineRef.current.subscribe(setLatestMetrics)
@@ -133,6 +146,47 @@ export default function LiveMonitor() {
     animFrameRef.current = requestAnimationFrame(runLoop)
   }, [draw])
 
+  const stopRecording = useCallback(async () => {
+    if (sessionTimerRef.current) {
+      clearInterval(sessionTimerRef.current)
+      sessionTimerRef.current = null
+    }
+    if (flushIntervalRef.current) {
+      clearInterval(flushIntervalRef.current)
+      flushIntervalRef.current = null
+    }
+    const id = sessionIdRef.current
+    isRecordingRef.current = false
+    sessionIdRef.current = null
+    setIsRecording(false)
+    setRecordingSeconds(0)
+    if (id) {
+      const remaining = pendingEventsRef.current.splice(0)
+      if (remaining.length > 0) await appendEvents(id, remaining)
+      await completeSession(id)
+    }
+  }, [])
+
+  const startRecording = useCallback(async () => {
+    const { session_id } = await createSession()
+    sessionIdRef.current = session_id
+    pendingEventsRef.current = []
+    setRecordingSeconds(0)
+    setIsRecording(true)
+    isRecordingRef.current = true
+
+    sessionTimerRef.current = setInterval(() => {
+      setRecordingSeconds((s) => s + 1)
+    }, 1000)
+
+    flushIntervalRef.current = setInterval(async () => {
+      const batch = pendingEventsRef.current.splice(0)
+      if (batch.length > 0 && sessionIdRef.current) {
+        await appendEvents(sessionIdRef.current, batch)
+      }
+    }, 5000)
+  }, [])
+
   const startCamera = useCallback(async () => {
     setError(null)
     try {
@@ -178,12 +232,26 @@ export default function LiveMonitor() {
       const detector = new MouthTicDetector(pipelineRef.current)
       detector.subscribe((event) => {
         setRecentTics((prev) => [event, ...prev].slice(0, 5))
+        if (isRecordingRef.current) {
+          pendingEventsRef.current.push({
+            timestamp: new Date(event.timestamp).toISOString(),
+            tic_type: 'mouth',
+            confidence: event.confidence,
+          })
+        }
       })
       detectorRef.current = detector
 
       const handDetector = new HandTicDetector(pipelineRef.current)
       handDetector.subscribe((event) => {
         setRecentHandTics((prev) => [event, ...prev].slice(0, 5))
+        if (isRecordingRef.current) {
+          pendingEventsRef.current.push({
+            timestamp: new Date(event.timestamp).toISOString(),
+            tic_type: 'hand',
+            confidence: event.confidence,
+          })
+        }
       })
       handDetectorRef.current = handDetector
 
@@ -195,6 +263,7 @@ export default function LiveMonitor() {
   }, [onFaceResults, onHandResults, runLoop])
 
   const stopCamera = useCallback(() => {
+    if (isRecordingRef.current) void stopRecording()
     if (animFrameRef.current !== null) {
       cancelAnimationFrame(animFrameRef.current)
       animFrameRef.current = null
@@ -220,7 +289,7 @@ export default function LiveMonitor() {
     pipelineRef.current.reset()
     setLatestMetrics(null)
     setIsRunning(false)
-  }, [])
+  }, [stopRecording])
 
   useEffect(() => stopCamera, [stopCamera])
 
@@ -241,6 +310,25 @@ export default function LiveMonitor() {
           {isRunning ? 'Stop Camera' : 'Start Camera'}
         </button>
       </div>
+
+      {isRunning && (
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            onClick={isRecording ? stopRecording : startRecording}
+            className={`px-4 py-2 rounded-md text-sm font-medium text-white transition-colors ${
+              isRecording ? 'bg-red-700 hover:bg-red-800' : 'bg-green-600 hover:bg-green-700'
+            }`}
+          >
+            {isRecording ? 'Stop Recording' : 'Start Recording'}
+          </button>
+          {isRecording && (
+            <span className="text-sm font-mono text-red-400">
+              ● REC {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:
+              {String(recordingSeconds % 60).padStart(2, '0')}
+            </span>
+          )}
+        </div>
+      )}
 
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
