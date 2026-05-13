@@ -1,7 +1,13 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from .scoring import SeverityResult
 
 
 class TicType(str, Enum):
@@ -31,3 +37,4 @@ class Session:
     events: list[TicEvent] = field(default_factory=list)
     severity_score: float | None = None
     completed_at: datetime | None = None
+    severity_detail: SeverityResult | None = None
