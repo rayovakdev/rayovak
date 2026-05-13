@@ -37,12 +37,29 @@ class SessionSummary(BaseModel):
     event_count: int
 
 
+class RegionScoresOut(BaseModel):
+    face: float
+    mouth: float
+    hands: float
+    body: float
+
+
+class SeverityDetailOut(BaseModel):
+    composite: float
+    frequency_score: float
+    intensity_score: float
+    repetitiveness_score: float
+    variety_score: float
+    region_scores: RegionScoresOut
+
+
 class SessionDetail(BaseModel):
     session_id: UUID
     started_at: datetime
     completed_at: datetime | None
     status: SessionStatus
     severity_score: float | None
+    severity_detail: SeverityDetailOut | None
     events: list[TicEventIn]
 
 
@@ -102,12 +119,29 @@ def get_session(session_id: UUID) -> SessionDetail:
     session = _store.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    severity_detail: SeverityDetailOut | None = None
+    if session.severity_detail is not None:
+        d = session.severity_detail
+        severity_detail = SeverityDetailOut(
+            composite=d.composite,
+            frequency_score=d.frequency_score,
+            intensity_score=d.intensity_score,
+            repetitiveness_score=d.repetitiveness_score,
+            variety_score=d.variety_score,
+            region_scores=RegionScoresOut(
+                face=d.region_scores.face,
+                mouth=d.region_scores.mouth,
+                hands=d.region_scores.hands,
+                body=d.region_scores.body,
+            ),
+        )
     return SessionDetail(
         session_id=session.id,
         started_at=session.started_at,
         completed_at=session.completed_at,
         status=session.status,
         severity_score=session.severity_score,
+        severity_detail=severity_detail,
         events=[
             TicEventIn(timestamp=e.timestamp, tic_type=e.tic_type, confidence=e.confidence)
             for e in session.events

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from backend.video_analysis.domain.scoring import compute_severity
 from backend.video_analysis.domain.session import Session, SessionStatus, TicEvent
 
 
@@ -14,11 +15,10 @@ class SessionService:
 
     def complete_session(self, session: Session) -> Session:
         session.status = SessionStatus.completed
-        session.completed_at = datetime.now(timezone.utc)
-        session.severity_score = self._compute_severity(session.events)
+        now = datetime.now(timezone.utc)
+        session.completed_at = now
+        duration = (now - session.started_at).total_seconds()
+        result = compute_severity(session.events, duration)
+        session.severity_score = result.composite
+        session.severity_detail = result
         return session
-
-    def _compute_severity(self, events: list[TicEvent]) -> float:
-        if not events:
-            return 0.0
-        return round(sum(e.confidence for e in events) / len(events) * 10, 2)
