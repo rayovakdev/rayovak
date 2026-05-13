@@ -32,3 +32,39 @@ export interface SessionSummary {
 export async function listSessions(): Promise<SessionSummary[]> {
   return api.get<SessionSummary[]>(BASE)
 }
+
+export interface TicEventRecord {
+  timestamp: string
+  tic_type: 'mouth' | 'hand' | 'face' | 'body'
+  confidence: number
+}
+
+export interface RegionScores {
+  face: number
+  mouth: number
+  hands: number
+  body: number
+}
+
+export interface SeverityDetail {
+  composite: number
+  frequency_score: number
+  intensity_score: number
+  repetitiveness_score: number
+  variety_score: number
+  region_scores: RegionScores
+}
+
+export interface SessionDetail {
+  session_id: string
+  started_at: string
+  completed_at: string | null
+  status: 'active' | 'completed'
+  severity_score: number | null
+  severity_detail: SeverityDetail | null
+  events: TicEventRecord[]
+}
+
+export async function getSession(sessionId: string): Promise<SessionDetail> {
+  return api.get<SessionDetail>(`${BASE}/${sessionId}`)
+}

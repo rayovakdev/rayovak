@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import LiveMonitor from './pages/LiveMonitor'
 import UploadAnalyze from './pages/UploadAnalyze'
 import SessionHistory from './pages/SessionHistory'
+import SessionDetailPage from './pages/SessionDetail'
 import Settings from './pages/Settings'
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="live-monitor" element={<LiveMonitor />} />
         <Route path="upload" element={<UploadAnalyze />} />
         <Route path="history" element={<SessionHistory />} />
+        <Route path="sessions/:sessionId" element={<SessionDetailPage />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
