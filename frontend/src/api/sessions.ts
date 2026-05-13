@@ -19,3 +19,16 @@ export async function appendEvents(sessionId: string, events: TicEventPayload[])
 export async function completeSession(sessionId: string): Promise<void> {
   await api.post<void>(`${BASE}/${sessionId}/complete`, {})
 }
+
+export interface SessionSummary {
+  session_id: string
+  started_at: string
+  completed_at: string | null
+  status: 'active' | 'completed'
+  severity_score: number | null
+  event_count: number
+}
+
+export async function listSessions(): Promise<SessionSummary[]> {
+  return api.get<SessionSummary[]>(BASE)
+}
