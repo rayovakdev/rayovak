@@ -229,7 +229,8 @@ export default function LiveMonitor() {
       await hands.initialize()
       handsRef.current = hands
 
-      const detector = new MouthTicDetector(pipelineRef.current)
+      const faceSigma = parseFloat(localStorage.getItem('ray_face_sigma') ?? '2.0')
+      const detector = new MouthTicDetector(pipelineRef.current, { sigmaThreshold: faceSigma })
       detector.subscribe((event) => {
         setRecentTics((prev) => [event, ...prev].slice(0, 5))
         if (isRecordingRef.current) {
@@ -242,7 +243,8 @@ export default function LiveMonitor() {
       })
       detectorRef.current = detector
 
-      const handDetector = new HandTicDetector(pipelineRef.current)
+      const handMinVelocity = parseFloat(localStorage.getItem('ray_hand_min_velocity') ?? '0.005')
+      const handDetector = new HandTicDetector(pipelineRef.current, { minVelocity: handMinVelocity })
       handDetector.subscribe((event) => {
         setRecentHandTics((prev) => [event, ...prev].slice(0, 5))
         if (isRecordingRef.current) {
