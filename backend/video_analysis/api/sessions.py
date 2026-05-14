@@ -4,7 +4,13 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.video_analysis.domain.session import Session, SessionStatus, TicEvent, TicType
+from backend.video_analysis.domain.session import (
+    ConfirmationStatus,
+    Session,
+    SessionStatus,
+    TicEvent,
+    TicType,
+)
 from backend.video_analysis.services.session_service import SessionService
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -24,8 +30,31 @@ class TicEventIn(BaseModel):
     confidence: float
 
 
+class TicEventOut(BaseModel):
+    timestamp: datetime
+    tic_type: TicType
+    confidence: float
+    confirmation: ConfirmationStatus | None
+    annotation: str
+
+
 class AppendEventsRequest(BaseModel):
     events: list[TicEventIn]
+
+
+class ConfirmEventRequest(BaseModel):
+    status: ConfirmationStatus
+    annotation: str = ""
+
+
+class BulkConfirmItem(BaseModel):
+    event_index: int
+    status: ConfirmationStatus
+    annotation: str = ""
+
+
+class BulkConfirmRequest(BaseModel):
+    confirmations: list[BulkConfirmItem]
 
 
 class SessionSummary(BaseModel):
@@ -35,6 +64,8 @@ class SessionSummary(BaseModel):
     status: SessionStatus
     severity_score: float | None
     event_count: int
+    confirmed_count: int
+    rejected_count: int
 
 
 class RegionScoresOut(BaseModel):
@@ -60,7 +91,9 @@ class SessionDetail(BaseModel):
     status: SessionStatus
     severity_score: float | None
     severity_detail: SeverityDetailOut | None
-    events: list[TicEventIn]
+    events: list[TicEventOut]
+    confirmed_count: int
+    rejected_count: int
 
 
 @router.post("", response_model=CreateSessionResponse, status_code=201)
@@ -93,6 +126,32 @@ def complete_session(session_id: UUID) -> SessionSummary:
         raise HTTPException(status_code=409, detail="Session already completed")
     _service.complete_session(session)
     return _session_to_summary(session)
+
+
+@router.post("/{session_id}/events/{event_index}/confirmation", status_code=204)
+def confirm_event(session_id: UUID, event_index: int, body: ConfirmEventRequest) -> None:
+    session = _store.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status == SessionStatus.active:
+        raise HTTPException(status_code=409, detail="Cannot confirm events on an active session")
+    if event_index < 0 or event_index >= len(session.events):
+        raise HTTPException(status_code=404, detail="Event not found")
+    session.events[event_index].confirmation = body.status
+    session.events[event_index].annotation = body.annotation
+
+
+@router.post("/{session_id}/events/bulk-confirmation", status_code=204)
+def bulk_confirm_events(session_id: UUID, body: BulkConfirmRequest) -> None:
+    session = _store.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status == SessionStatus.active:
+        raise HTTPException(status_code=409, detail="Cannot confirm events on an active session")
+    for item in body.confirmations:
+        if 0 <= item.event_index < len(session.events):
+            session.events[item.event_index].confirmation = item.status
+            session.events[item.event_index].annotation = item.annotation
 
 
 @router.get("", response_model=list[SessionSummary])
@@ -135,6 +194,8 @@ def get_session(session_id: UUID) -> SessionDetail:
                 body=d.region_scores.body,
             ),
         )
+    confirmed = sum(1 for e in session.events if e.confirmation == ConfirmationStatus.confirmed)
+    rejected = sum(1 for e in session.events if e.confirmation == ConfirmationStatus.rejected)
     return SessionDetail(
         session_id=session.id,
         started_at=session.started_at,
@@ -143,13 +204,23 @@ def get_session(session_id: UUID) -> SessionDetail:
         severity_score=session.severity_score,
         severity_detail=severity_detail,
         events=[
-            TicEventIn(timestamp=e.timestamp, tic_type=e.tic_type, confidence=e.confidence)
+            TicEventOut(
+                timestamp=e.timestamp,
+                tic_type=e.tic_type,
+                confidence=e.confidence,
+                confirmation=e.confirmation,
+                annotation=e.annotation,
+            )
             for e in session.events
         ],
+        confirmed_count=confirmed,
+        rejected_count=rejected,
     )
 
 
 def _session_to_summary(session: Session) -> SessionSummary:
+    confirmed = sum(1 for e in session.events if e.confirmation == ConfirmationStatus.confirmed)
+    rejected = sum(1 for e in session.events if e.confirmation == ConfirmationStatus.rejected)
     return SessionSummary(
         session_id=session.id,
         started_at=session.started_at,
@@ -157,4 +228,6 @@ def _session_to_summary(session: Session) -> SessionSummary:
         status=session.status,
         severity_score=session.severity_score,
         event_count=len(session.events),
+        confirmed_count=confirmed,
+        rejected_count=rejected,
     )
