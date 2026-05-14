@@ -12,10 +12,10 @@ export interface HandTicEvent {
 type HandTicListener = (event: HandTicEvent) => void
 
 const WINDOW_MS = 10_000
-const MIN_VELOCITY = 0.005
 
 class HandTracker {
   private readonly side: HandSide
+  private readonly minVelocity: number
   private readonly similarityThreshold: number
   private readonly minRepetitions: number
   private readonly listeners: Set<HandTicListener>
@@ -27,11 +27,13 @@ class HandTracker {
 
   constructor(
     side: HandSide,
+    minVelocity: number,
     similarityThreshold: number,
     minRepetitions: number,
     listeners: Set<HandTicListener>,
   ) {
     this.side = side
+    this.minVelocity = minVelocity
     this.similarityThreshold = similarityThreshold
     this.minRepetitions = minRepetitions
     this.listeners = listeners
@@ -44,14 +46,14 @@ class HandTracker {
     }
 
     if (!this.inBurst) {
-      if (velocity > MIN_VELOCITY) {
+      if (velocity > this.minVelocity) {
         this.inBurst = true
         this.burstStart = timestamp
         this.burstPeak = velocity
       }
     } else {
       if (velocity > this.burstPeak) this.burstPeak = velocity
-      if (velocity <= MIN_VELOCITY) {
+      if (velocity <= this.minVelocity) {
         this.bursts.push({ timestamp: this.burstStart, peakVelocity: this.burstPeak })
         this.inBurst = false
 
@@ -86,13 +88,14 @@ export class HandTicDetector {
 
   constructor(
     pipeline: LandmarkPipeline,
-    options?: { similarityThreshold?: number; minRepetitions?: number },
+    options?: { minVelocity?: number; similarityThreshold?: number; minRepetitions?: number },
   ) {
+    const minVelocity = options?.minVelocity ?? 0.005
     const similarityThreshold = options?.similarityThreshold ?? 0.02
     const minRepetitions = options?.minRepetitions ?? 3
 
-    this.leftTracker = new HandTracker('left', similarityThreshold, minRepetitions, this.listeners)
-    this.rightTracker = new HandTracker('right', similarityThreshold, minRepetitions, this.listeners)
+    this.leftTracker = new HandTracker('left', minVelocity, similarityThreshold, minRepetitions, this.listeners)
+    this.rightTracker = new HandTracker('right', minVelocity, similarityThreshold, minRepetitions, this.listeners)
 
     this.unsubscribe = pipeline.subscribe((metrics: FrameMetrics) => {
       if (metrics.leftHand) this.leftTracker.process(metrics.leftHand.velocity, metrics.timestamp)
