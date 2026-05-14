@@ -27,6 +27,8 @@ export interface SessionSummary {
   status: 'active' | 'completed'
   severity_score: number | null
   event_count: number
+  confirmed_count: number
+  rejected_count: number
 }
 
 export async function listSessions(): Promise<SessionSummary[]> {
@@ -37,6 +39,8 @@ export interface TicEventRecord {
   timestamp: string
   tic_type: 'mouth' | 'hand' | 'face' | 'body'
   confidence: number
+  confirmation: 'confirmed' | 'rejected' | null
+  annotation: string
 }
 
 export interface RegionScores {
@@ -63,8 +67,31 @@ export interface SessionDetail {
   severity_score: number | null
   severity_detail: SeverityDetail | null
   events: TicEventRecord[]
+  confirmed_count: number
+  rejected_count: number
 }
 
 export async function getSession(sessionId: string): Promise<SessionDetail> {
   return api.get<SessionDetail>(`${BASE}/${sessionId}`)
+}
+
+export async function confirmEvent(
+  sessionId: string,
+  eventIndex: number,
+  status: 'confirmed' | 'rejected',
+  annotation?: string,
+): Promise<void> {
+  await api.post<void>(`${BASE}/${sessionId}/events/${eventIndex}/confirmation`, {
+    status,
+    annotation: annotation ?? '',
+  })
+}
+
+export async function bulkConfirmEvents(
+  sessionId: string,
+  confirmations: Array<{ event_index: number; status: 'confirmed' | 'rejected'; annotation?: string }>,
+): Promise<void> {
+  await api.post<void>(`${BASE}/${sessionId}/events/bulk-confirmation`, {
+    confirmations: confirmations.map((c) => ({ ...c, annotation: c.annotation ?? '' })),
+  })
 }

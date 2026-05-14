@@ -22,11 +22,18 @@ class SessionStatus(str, Enum):
     completed = "completed"
 
 
+class ConfirmationStatus(str, Enum):
+    confirmed = "confirmed"
+    rejected = "rejected"
+
+
 @dataclass
 class TicEvent:
     timestamp: datetime
     tic_type: TicType
     confidence: float
+    confirmation: ConfirmationStatus | None = None
+    annotation: str = ""
 
 
 @dataclass
