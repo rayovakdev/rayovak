@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { listSessions } from '../api/sessions'
 import type { SessionSummary } from '../api/sessions'
 
@@ -64,6 +64,8 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null)
   const [range, setRange] = useState<DayRange>(30)
   const [activeOverlays, setActiveOverlays] = useState<Set<HealthOverlay>>(new Set())
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; label: string } | null>(null)
+  const chartRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     listSessions()
@@ -206,6 +208,15 @@ export default function Dashboard() {
                 No completed sessions in the last {range} days.
               </p>
             ) : (
+              <div className="relative" ref={chartRef}>
+                {tooltip && (
+                  <div
+                    className="absolute z-10 rounded bg-gray-900 px-2 py-1 text-xs text-white pointer-events-none whitespace-nowrap"
+                    style={{ left: tooltip.x + 10, top: tooltip.y - 36 }}
+                  >
+                    {tooltip.label}
+                  </div>
+                )}
               <svg
                 viewBox={`0 0 ${CHART_W} ${CHART_H}`}
                 className="w-full"
@@ -246,7 +257,19 @@ export default function Dashboard() {
                 )}
 
                 {chartPoints.map((p, i) => (
-                  <g key={i}>
+                  <g
+                    key={i}
+                    onMouseEnter={(e) => {
+                      const rect = chartRef.current?.getBoundingClientRect()
+                      if (!rect) return
+                      setTooltip({
+                        x: e.clientX - rect.left,
+                        y: e.clientY - rect.top,
+                        label: `${p.date}: ${p.score.toFixed(1)}`,
+                      })
+                    }}
+                    onMouseLeave={() => setTooltip(null)}
+                  >
                     <circle
                       cx={p.x}
                       cy={p.y}
@@ -255,7 +278,6 @@ export default function Dashboard() {
                       stroke="#fff"
                       strokeWidth={1.5}
                     />
-                    <title>{`${p.date}: ${p.score.toFixed(1)}`}</title>
                   </g>
                 ))}
 
@@ -268,6 +290,7 @@ export default function Dashboard() {
                   strokeWidth={1}
                 />
               </svg>
+              </div>
             )}
           </div>
 
