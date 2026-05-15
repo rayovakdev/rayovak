@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { listSessions, getSession } from '../api/sessions'
+import { connectGarmin, disconnectGarmin, getGarminStatus, type GarminStatus } from '../api/garmin'
 
 function triggerDownload(content: string, filename: string, mimeType: string): void {
   const blob = new Blob([content], { type: mimeType })
@@ -20,6 +21,15 @@ export default function Settings() {
   )
   const [exportingSessionsCsv, setExportingSessionsCsv] = useState(false)
   const [exportingSessionsJson, setExportingSessionsJson] = useState(false)
+  const [garminStatus, setGarminStatus] = useState<GarminStatus | null>(null)
+  const [garminLoading, setGarminLoading] = useState(false)
+  const [garminError, setGarminError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getGarminStatus()
+      .then(setGarminStatus)
+      .catch(() => null)
+  }, [])
 
   function handleFaceSigmaChange(value: number): void {
     setFaceSigma(value)
@@ -54,6 +64,32 @@ export default function Settings() {
       triggerDownload(JSON.stringify(details, null, 2), 'sessions.json', 'application/json')
     } finally {
       setExportingSessionsJson(false)
+    }
+  }
+
+  async function handleGarminConnect(): Promise<void> {
+    setGarminLoading(true)
+    setGarminError(null)
+    try {
+      const status = await connectGarmin()
+      setGarminStatus(status)
+    } catch (err) {
+      setGarminError(err instanceof Error ? err.message : 'Connection failed')
+    } finally {
+      setGarminLoading(false)
+    }
+  }
+
+  async function handleGarminDisconnect(): Promise<void> {
+    setGarminLoading(true)
+    setGarminError(null)
+    try {
+      const status = await disconnectGarmin()
+      setGarminStatus(status)
+    } catch (err) {
+      setGarminError(err instanceof Error ? err.message : 'Disconnect failed')
+    } finally {
+      setGarminLoading(false)
     }
   }
 
@@ -115,24 +151,45 @@ export default function Settings() {
       <section className="mt-10">
         <h2 className="text-lg font-semibold text-gray-800">Garmin Connect</h2>
         <div className="mt-4 flex items-center gap-3">
-          <span className="inline-flex items-center gap-1.5 text-sm text-gray-400">
-            <span className="inline-block h-2 w-2 rounded-full bg-gray-300" />
-            Not connected
-          </span>
-          <button
-            disabled
-            className="px-3 py-1.5 rounded-md text-sm font-medium text-gray-400 bg-gray-100 cursor-not-allowed"
-          >
-            Connect Garmin
-          </button>
+          {garminStatus?.connected ? (
+            <span className="inline-flex items-center gap-1.5 text-sm text-green-600">
+              <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+              Connected
+              {garminStatus.display_name && ` as ${garminStatus.display_name}`}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-sm text-gray-400">
+              <span className="inline-block h-2 w-2 rounded-full bg-gray-300" />
+              Not connected
+            </span>
+          )}
+          {garminStatus?.connected ? (
+            <button
+              onClick={() => void handleGarminDisconnect()}
+              disabled={garminLoading}
+              className="px-3 py-1.5 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {garminLoading ? 'Disconnecting…' : 'Disconnect'}
+            </button>
+          ) : (
+            <button
+              onClick={() => void handleGarminConnect()}
+              disabled={garminLoading}
+              className="px-3 py-1.5 rounded-md text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {garminLoading ? 'Connecting…' : 'Connect Garmin'}
+            </button>
+          )}
         </div>
-        <p className="mt-2 text-sm text-gray-400">Last sync: Never</p>
-        <button
-          disabled
-          className="mt-3 px-3 py-1.5 rounded-md text-sm font-medium text-gray-400 bg-gray-100 cursor-not-allowed"
-        >
-          Sync Now
-        </button>
+        {garminStatus?.last_auth_at && (
+          <p className="mt-2 text-sm text-gray-500">
+            Last connected: {new Date(garminStatus.last_auth_at).toLocaleString()}
+          </p>
+        )}
+        {garminError && <p className="mt-2 text-sm text-red-600">{garminError}</p>}
+        <p className="mt-2 text-xs text-gray-400">
+          Set GARMIN_EMAIL and GARMIN_PASSWORD in your .env to enable connection.
+        </p>
       </section>
 
       <section className="mt-10">
