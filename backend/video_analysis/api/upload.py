@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from backend.video_analysis.api.sessions import _store
+from backend.video_analysis.api.sessions import _store, _video_store
 from backend.video_analysis.services.session_service import SessionService
 
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -33,6 +33,7 @@ async def upload_video(file: UploadFile) -> UploadResponse:
     session = _service.create_session()
     _service.complete_session(session)
     _store[session.id] = session
+    _video_store[session.id] = (content, file.content_type or "video/mp4")
 
     return UploadResponse(
         session_id=str(session.id),

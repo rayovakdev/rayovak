@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from backend.video_analysis.domain.session import (
@@ -16,6 +17,7 @@ from backend.video_analysis.services.session_service import SessionService
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 _store: dict[UUID, Session] = {}
+_video_store: dict[UUID, tuple[bytes, str]] = {}
 _service = SessionService()
 
 
@@ -94,6 +96,7 @@ class SessionDetail(BaseModel):
     events: list[TicEventOut]
     confirmed_count: int
     rejected_count: int
+    has_video: bool
 
 
 @router.post("", response_model=CreateSessionResponse, status_code=201)
@@ -173,6 +176,17 @@ def list_sessions(
     return [_session_to_summary(s) for s in sessions]
 
 
+@router.get("/{session_id}/video")
+def get_session_video(session_id: UUID) -> Response:
+    if session_id not in _store:
+        raise HTTPException(status_code=404, detail="Session not found")
+    entry = _video_store.get(session_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="No video for this session")
+    content, content_type = entry
+    return Response(content=content, media_type=content_type)
+
+
 @router.get("/{session_id}", response_model=SessionDetail)
 def get_session(session_id: UUID) -> SessionDetail:
     session = _store.get(session_id)
@@ -215,6 +229,7 @@ def get_session(session_id: UUID) -> SessionDetail:
         ],
         confirmed_count=confirmed,
         rejected_count=rejected,
+        has_video=session.id in _video_store,
     )
 
 
