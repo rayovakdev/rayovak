@@ -69,6 +69,7 @@ export interface SessionDetail {
   events: TicEventRecord[]
   confirmed_count: number
   rejected_count: number
+  has_video: boolean
 }
 
 export async function getSession(sessionId: string): Promise<SessionDetail> {

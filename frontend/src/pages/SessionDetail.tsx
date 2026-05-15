@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   getSession,
@@ -48,6 +48,8 @@ export default function SessionDetailPage() {
   const [savingIdx, setSavingIdx] = useState<number | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [bulkError, setBulkError] = useState<string | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [activeEventIdx, setActiveEventIdx] = useState<number | null>(null)
 
   useEffect(() => {
     if (!sessionId) return
@@ -115,6 +117,18 @@ export default function SessionDetailPage() {
     }
   }
 
+  function seekToEvent(idx: number) {
+    if (!session) return
+    const event = session.events[idx]
+    const offsetSeconds =
+      (new Date(event.timestamp).getTime() - new Date(session.started_at).getTime()) / 1000
+    if (videoRef.current) {
+      videoRef.current.currentTime = Math.max(0, offsetSeconds)
+      videoRef.current.play().catch(() => {})
+    }
+    setActiveEventIdx(idx)
+  }
+
   if (loading) return <div className="text-sm text-gray-500">Loading...</div>
   if (error) return <div className="text-sm text-red-600">{error}</div>
   if (!session) return null
@@ -171,6 +185,18 @@ export default function SessionDetailPage() {
               <div className="text-lg font-semibold text-gray-700 mt-1">{score.toFixed(1)}</div>
             </div>
           ))}
+        </div>
+      )}
+
+      {session.has_video && (
+        <div className="mt-6">
+          <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Video</div>
+          <video
+            ref={videoRef}
+            src={`/api/v1/video_analysis/sessions/${session.session_id}/video`}
+            controls
+            className="w-full rounded-lg border border-gray-200 bg-black max-h-80"
+          />
         </div>
       )}
 
@@ -277,7 +303,8 @@ export default function SessionDetailPage() {
                 <th className="pb-2 pr-4">Time</th>
                 <th className="pb-2 pr-4">Type</th>
                 <th className="pb-2 pr-4">Confidence</th>
-                <th className="pb-2">Status</th>
+                <th className="pb-2 pr-4">Status</th>
+                {session.has_video && <th className="pb-2"></th>}
               </tr>
             </thead>
             <tbody>
@@ -298,11 +325,22 @@ export default function SessionDetailPage() {
                       </span>
                     </td>
                     <td className="py-2 pr-4 text-gray-600">{(evt.confidence * 100).toFixed(0)}%</td>
-                    <td className="py-2">
+                    <td className="py-2 pr-4">
                       {state?.status === 'confirmed' && <span className="text-xs text-green-600 font-medium">✓ Confirmed</span>}
                       {state?.status === 'rejected' && <span className="text-xs text-red-500 font-medium">✗ Rejected</span>}
                       {(!state || state.status === 'pending') && <span className="text-xs text-gray-400">Pending</span>}
                     </td>
+                    {session.has_video && (
+                      <td className="py-2">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); seekToEvent(i) }}
+                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${activeEventIdx === i ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600'}`}
+                          title="Seek video to this event"
+                        >
+                          ▶
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 )
               })}
