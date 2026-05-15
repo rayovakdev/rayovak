@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://rayovak:rayovak@localhost:5432/rayovak"
     garmin_email: str = ""
     garmin_password: str = ""
+    seed_on_startup: bool = True
 
 
 settings = Settings()
