@@ -172,24 +172,29 @@ export default function LiveMonitor() {
   }, [])
 
   const startRecording = useCallback(async () => {
-    const { session_id } = await createSession()
-    sessionIdRef.current = session_id
-    pendingEventsRef.current = []
-    setSessionEvents([])
-    setRecordingSeconds(0)
-    setIsRecording(true)
-    isRecordingRef.current = true
+    setError(null)
+    try {
+      const { session_id } = await createSession()
+      sessionIdRef.current = session_id
+      pendingEventsRef.current = []
+      setSessionEvents([])
+      setRecordingSeconds(0)
+      setIsRecording(true)
+      isRecordingRef.current = true
 
-    sessionTimerRef.current = setInterval(() => {
-      setRecordingSeconds((s) => s + 1)
-    }, 1000)
+      sessionTimerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1)
+      }, 1000)
 
-    flushIntervalRef.current = setInterval(async () => {
-      const batch = pendingEventsRef.current.splice(0)
-      if (batch.length > 0 && sessionIdRef.current) {
-        await appendEvents(sessionIdRef.current, batch)
-      }
-    }, 5000)
+      flushIntervalRef.current = setInterval(async () => {
+        const batch = pendingEventsRef.current.splice(0)
+        if (batch.length > 0 && sessionIdRef.current) {
+          await appendEvents(sessionIdRef.current, batch)
+        }
+      }, 5000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start recording')
+    }
   }, [])
 
   const startCamera = useCallback(async () => {
