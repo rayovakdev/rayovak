@@ -1,8 +1,12 @@
+import asyncio
+from functools import partial
+
 from fastapi import APIRouter, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from backend.video_analysis.api.sessions import _store, _video_store
 from backend.video_analysis.services.session_service import SessionService
+from backend.video_analysis.services.video_analyzer import analyze_video
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
@@ -31,6 +35,14 @@ async def upload_video(file: UploadFile) -> UploadResponse:
         raise HTTPException(status_code=413, detail="File exceeds 500 MB limit")
 
     session = _service.create_session()
+
+    loop = asyncio.get_event_loop()
+    events = await loop.run_in_executor(
+        None,
+        partial(analyze_video, content, session.id, session.started_at),
+    )
+
+    _service.append_events(session, events)
     _service.complete_session(session)
     _store[session.id] = session
     _video_store[session.id] = (content, file.content_type or "video/mp4")
