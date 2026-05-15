@@ -30,7 +30,8 @@ class SeverityResult:
 
 
 _BASELINE_FREQ_PER_MIN = 5.0
-_MAX_VARIETY = len(TicType)
+_DETECTED_TIC_TYPES = frozenset({TicType.mouth, TicType.hand, TicType.face, TicType.body})
+_MAX_VARIETY = len(_DETECTED_TIC_TYPES)
 
 
 def compute_severity(
@@ -62,7 +63,8 @@ def compute_severity(
     most_common_count = max(type_counts.values()) if type_counts else 0
     repetitiveness_score = min(100.0, (most_common_count / len(events)) * 100.0)
 
-    variety_score = min(100.0, (len(type_counts) / _MAX_VARIETY) * 100.0)
+    detected_variety = len(type_counts.keys() & _DETECTED_TIC_TYPES)
+    variety_score = min(100.0, (detected_variety / _MAX_VARIETY) * 100.0)
 
     composite = round(
         frequency_score * w.frequency

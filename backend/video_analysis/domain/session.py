@@ -15,6 +15,7 @@ class TicType(str, Enum):
     hand = "hand"
     face = "face"
     body = "body"
+    manual = "manual"
 
 
 class SessionStatus(str, Enum):

@@ -61,6 +61,8 @@ export default function LiveMonitor() {
   const [latestMetrics, setLatestMetrics] = useState<FrameMetrics | null>(null)
   const [recentTics, setRecentTics] = useState<TicEvent[]>([])
   const [recentHandTics, setRecentHandTics] = useState<HandTicEvent[]>([])
+  const [tagFlash, setTagFlash] = useState(false)
+  const [manualTagCount, setManualTagCount] = useState(0)
 
   useEffect(() => {
     isRecordingRef.current = isRecording
@@ -165,6 +167,8 @@ export default function LiveMonitor() {
       if (remaining.length > 0) await appendEvents(id, remaining)
       await completeSession(id)
     }
+    setTagFlash(false)
+    setManualTagCount(0)
   }, [])
 
   const startRecording = useCallback(async () => {
@@ -290,10 +294,36 @@ export default function LiveMonitor() {
     setRecentHandTics([])
     pipelineRef.current.reset()
     setLatestMetrics(null)
+    setTagFlash(false)
+    setManualTagCount(0)
     setIsRunning(false)
   }, [stopRecording])
 
   useEffect(() => stopCamera, [stopCamera])
+
+  const tagManualTic = useCallback(() => {
+    if (!isRecordingRef.current) return
+    pendingEventsRef.current.push({
+      timestamp: new Date().toISOString(),
+      tic_type: 'manual',
+      confidence: 1.0,
+    })
+    setManualTagCount((n) => n + 1)
+    setTagFlash(true)
+    setTimeout(() => setTagFlash(false), 800)
+  }, [])
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.code !== 'Space') return
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+      e.preventDefault()
+      tagManualTic()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [tagManualTic])
 
   const vel = (v: number | undefined) => (v ?? 0).toFixed(4)
 
@@ -314,7 +344,7 @@ export default function LiveMonitor() {
       </div>
 
       {isRunning && (
-        <div className="mt-3 flex items-center gap-3">
+        <div className="mt-3 flex items-center gap-3 flex-wrap">
           <button
             onClick={isRecording ? stopRecording : startRecording}
             className={`px-4 py-2 rounded-md text-sm font-medium text-white transition-colors ${
@@ -328,6 +358,24 @@ export default function LiveMonitor() {
               ● REC {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:
               {String(recordingSeconds % 60).padStart(2, '0')}
             </span>
+          )}
+          {isRecording && (
+            <button
+              onClick={tagManualTic}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                tagFlash
+                  ? 'bg-yellow-400 text-yellow-900'
+                  : 'bg-yellow-500 hover:bg-yellow-600 text-white'
+              }`}
+            >
+              {tagFlash ? 'Tagged!' : 'Tag Tic Now'}
+            </button>
+          )}
+          {isRecording && (
+            <span className="text-xs text-gray-400">or press Space</span>
+          )}
+          {isRecording && manualTagCount > 0 && (
+            <span className="text-xs text-yellow-600 font-mono">{manualTagCount} manual</span>
           )}
         </div>
       )}
