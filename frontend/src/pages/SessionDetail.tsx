@@ -44,6 +44,9 @@ export default function SessionDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
   const [eventStates, setEventStates] = useState<Record<number, EventState>>({})
+  const [savingIdx, setSavingIdx] = useState<number | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [bulkError, setBulkError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!sessionId) return
@@ -66,14 +69,19 @@ export default function SessionDetailPage() {
 
   async function setEventStatus(idx: number, status: 'confirmed' | 'rejected') {
     const annotation = eventStates[idx]?.annotation ?? ''
+    setSavingIdx(idx)
+    setSaveError(null)
     try {
       await confirmEvent(sessionId!, idx, status, annotation)
       setEventStates((prev) => {
         const existing: EventState = prev[idx] ?? { status: 'pending', annotation: '' }
         return { ...prev, [idx]: { ...existing, status } }
       })
-    } catch {
-      // ignore network errors — UI state stays unchanged
+    } catch (e) {
+      console.error('Failed to save confirmation:', e)
+      setSaveError(e instanceof Error ? e.message : 'Failed to save')
+    } finally {
+      setSavingIdx(null)
     }
   }
 
@@ -90,6 +98,7 @@ export default function SessionDetailPage() {
       .map((_, i) => i)
       .filter((i) => !eventStates[i] || eventStates[i].status === 'pending')
     if (pending.length === 0) return
+    setBulkError(null)
     try {
       await bulkConfirmEvents(sessionId!, pending.map((i) => ({ event_index: i, status })))
       setEventStates((prev) => {
@@ -99,8 +108,9 @@ export default function SessionDetailPage() {
         }
         return next
       })
-    } catch {
-      // ignore network errors
+    } catch (e) {
+      console.error('Failed to bulk confirm:', e)
+      setBulkError(e instanceof Error ? e.message : 'Failed to save')
     }
   }
 
@@ -197,19 +207,22 @@ export default function SessionDetailPage() {
             <span className="text-gray-500">Confidence:</span>{' '}
             <span className="font-medium">{(selectedEvent.confidence * 100).toFixed(0)}%</span>
           </div>
-          <div className="flex gap-2 mb-3">
+          <div className="flex gap-2 mb-3 items-center">
             <button
               onClick={() => void setEventStatus(selected!, 'confirmed')}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${selectedState?.status === 'confirmed' ? 'bg-green-600 text-white' : 'bg-white border border-green-600 text-green-600 hover:bg-green-50'}`}
+              disabled={savingIdx === selected}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 ${selectedState?.status === 'confirmed' ? 'bg-green-600 text-white' : 'bg-white border border-green-600 text-green-600 hover:bg-green-50'}`}
             >
-              {selectedState?.status === 'confirmed' ? '✓ Confirmed' : 'Confirm'}
+              {savingIdx === selected ? 'Saving…' : selectedState?.status === 'confirmed' ? '✓ Confirmed' : 'Confirm'}
             </button>
             <button
               onClick={() => void setEventStatus(selected!, 'rejected')}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${selectedState?.status === 'rejected' ? 'bg-red-600 text-white' : 'bg-white border border-red-600 text-red-600 hover:bg-red-50'}`}
+              disabled={savingIdx === selected}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 ${selectedState?.status === 'rejected' ? 'bg-red-600 text-white' : 'bg-white border border-red-600 text-red-600 hover:bg-red-50'}`}
             >
-              {selectedState?.status === 'rejected' ? '✗ Rejected' : 'Reject'}
+              {savingIdx === selected ? 'Saving…' : selectedState?.status === 'rejected' ? '✗ Rejected' : 'Reject'}
             </button>
+            {saveError && <span className="text-xs text-red-500">{saveError}</span>}
           </div>
           <input
             type="text"
@@ -232,19 +245,22 @@ export default function SessionDetailPage() {
             )}
           </div>
           {isCompleted && session.events.length > 0 && (
-            <div className="flex gap-2">
-              <button
-                onClick={() => void handleBulkConfirm('confirmed')}
-                className="px-3 py-1.5 rounded-md text-xs font-medium bg-green-50 text-green-700 border border-green-300 hover:bg-green-100 transition-colors"
-              >
-                Confirm All Pending
-              </button>
-              <button
-                onClick={() => void handleBulkConfirm('rejected')}
-                className="px-3 py-1.5 rounded-md text-xs font-medium bg-red-50 text-red-700 border border-red-300 hover:bg-red-100 transition-colors"
-              >
-                Reject All Pending
-              </button>
+            <div className="flex flex-col gap-1">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void handleBulkConfirm('confirmed')}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-green-50 text-green-700 border border-green-300 hover:bg-green-100 transition-colors"
+                >
+                  Confirm All Pending
+                </button>
+                <button
+                  onClick={() => void handleBulkConfirm('rejected')}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-red-50 text-red-700 border border-red-300 hover:bg-red-100 transition-colors"
+                >
+                  Reject All Pending
+                </button>
+              </div>
+              {bulkError && <p className="text-xs text-red-500">{bulkError}</p>}
             </div>
           )}
         </div>
