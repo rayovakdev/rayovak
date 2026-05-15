@@ -6,11 +6,9 @@ import type { Results as FaceMeshResults } from '@mediapipe/face_mesh'
 import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands'
 import type { Results as HandsResults, NormalizedLandmark } from '@mediapipe/hands'
 import { LandmarkPipeline } from '../video_analysis/landmarkPipeline'
-import type { FrameMetrics, LandmarkPoint } from '../video_analysis/landmarkPipeline'
+import type { LandmarkPoint } from '../video_analysis/landmarkPipeline'
 import { MouthTicDetector } from '../video_analysis/mouthTicDetector'
-import type { TicEvent } from '../video_analysis/mouthTicDetector'
 import { HandTicDetector } from '../video_analysis/handTicDetector'
-import type { HandTicEvent } from '../video_analysis/handTicDetector'
 
 const FACE_MESH_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619'
 const HANDS_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240'
@@ -36,6 +34,14 @@ function drawConnections(
   }
 }
 
+type SessionEvent = {
+  timestamp: number
+  tic_type: 'mouth' | 'hand' | 'face' | 'body' | 'manual'
+  confidence: number
+}
+
+const GAUGE_ARC_LENGTH = Math.PI * 40
+
 export default function LiveMonitor() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -58,19 +64,13 @@ export default function LiveMonitor() {
   const [isRecording, setIsRecording] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [latestMetrics, setLatestMetrics] = useState<FrameMetrics | null>(null)
-  const [recentTics, setRecentTics] = useState<TicEvent[]>([])
-  const [recentHandTics, setRecentHandTics] = useState<HandTicEvent[]>([])
+  const [sessionEvents, setSessionEvents] = useState<SessionEvent[]>([])
   const [tagFlash, setTagFlash] = useState(false)
   const [manualTagCount, setManualTagCount] = useState(0)
 
   useEffect(() => {
     isRecordingRef.current = isRecording
   }, [isRecording])
-
-  useEffect(() => {
-    return pipelineRef.current.subscribe(setLatestMetrics)
-  }, [])
 
   const onFaceResults = useCallback((results: FaceMeshResults) => {
     faceResultsRef.current = results
@@ -175,6 +175,7 @@ export default function LiveMonitor() {
     const { session_id } = await createSession()
     sessionIdRef.current = session_id
     pendingEventsRef.current = []
+    setSessionEvents([])
     setRecordingSeconds(0)
     setIsRecording(true)
     isRecordingRef.current = true
@@ -236,13 +237,16 @@ export default function LiveMonitor() {
       const faceSigma = parseFloat(localStorage.getItem('ray_face_sigma') ?? '2.0')
       const detector = new MouthTicDetector(pipelineRef.current, { sigmaThreshold: faceSigma })
       detector.subscribe((event) => {
-        setRecentTics((prev) => [event, ...prev].slice(0, 5))
         if (isRecordingRef.current) {
           pendingEventsRef.current.push({
             timestamp: new Date(event.timestamp).toISOString(),
             tic_type: 'mouth',
             confidence: event.confidence,
           })
+          setSessionEvents((prev) => [
+            ...prev,
+            { timestamp: event.timestamp, tic_type: 'mouth', confidence: event.confidence },
+          ])
         }
       })
       detectorRef.current = detector
@@ -250,13 +254,16 @@ export default function LiveMonitor() {
       const handMinVelocity = parseFloat(localStorage.getItem('ray_hand_min_velocity') ?? '0.005')
       const handDetector = new HandTicDetector(pipelineRef.current, { minVelocity: handMinVelocity })
       handDetector.subscribe((event) => {
-        setRecentHandTics((prev) => [event, ...prev].slice(0, 5))
         if (isRecordingRef.current) {
           pendingEventsRef.current.push({
             timestamp: new Date(event.timestamp).toISOString(),
             tic_type: 'hand',
             confidence: event.confidence,
           })
+          setSessionEvents((prev) => [
+            ...prev,
+            { timestamp: event.timestamp, tic_type: 'hand', confidence: event.confidence },
+          ])
         }
       })
       handDetectorRef.current = handDetector
@@ -288,12 +295,10 @@ export default function LiveMonitor() {
     if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height)
     detectorRef.current?.destroy()
     detectorRef.current = null
-    setRecentTics([])
     handDetectorRef.current?.destroy()
     handDetectorRef.current = null
-    setRecentHandTics([])
     pipelineRef.current.reset()
-    setLatestMetrics(null)
+    setSessionEvents([])
     setTagFlash(false)
     setManualTagCount(0)
     setIsRunning(false)
@@ -303,11 +308,13 @@ export default function LiveMonitor() {
 
   const tagManualTic = useCallback(() => {
     if (!isRecordingRef.current) return
+    const now = Date.now()
     pendingEventsRef.current.push({
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(now).toISOString(),
       tic_type: 'manual',
       confidence: 1.0,
     })
+    setSessionEvents((prev) => [...prev, { timestamp: now, tic_type: 'manual', confidence: 1.0 }])
     setManualTagCount((n) => n + 1)
     setTagFlash(true)
     setTimeout(() => setTagFlash(false), 800)
@@ -325,14 +332,52 @@ export default function LiveMonitor() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [tagManualTic])
 
-  const vel = (v: number | undefined) => (v ?? 0).toFixed(4)
+  const totalCount = sessionEvents.length
+  const mouthCount = sessionEvents.filter((e) => e.tic_type === 'mouth').length
+  const handCount = sessionEvents.filter((e) => e.tic_type === 'hand').length
+  const avgConf = totalCount > 0 ? sessionEvents.reduce((sum, e) => sum + e.confidence, 0) / totalCount : 0
+  const durationMins = recordingSeconds / 60
+
+  const freqScore = durationMins > 0 ? Math.min(100, (totalCount / durationMins / 5.0) * 50) : 0
+  const intensityScore = Math.min(100, avgConf * 100)
+  const detectedTypes = new Set(sessionEvents.filter((e) => e.tic_type !== 'manual').map((e) => e.tic_type))
+  const varietyScore = Math.min(100, (detectedTypes.size / 4) * 100)
+  const typeCounts: Record<string, number> = {}
+  for (const e of sessionEvents) typeCounts[e.tic_type] = (typeCounts[e.tic_type] ?? 0) + 1
+  const maxTypeCount = totalCount > 0 ? Math.max(...Object.values(typeCounts)) : 0
+  const repetitivenessScore = totalCount > 0 ? Math.min(100, (maxTypeCount / totalCount) * 100) : 0
+  const severityScore = Math.round(
+    freqScore * 0.4 + intensityScore * 0.25 + repetitivenessScore * 0.2 + varietyScore * 0.15,
+  )
+
+  const gaugeColor = severityScore < 34 ? '#22c55e' : severityScore < 67 ? '#f59e0b' : '#ef4444'
+  const severityLabel =
+    severityScore === 0
+      ? '—'
+      : severityScore < 26
+        ? 'Minimal'
+        : severityScore < 51
+          ? 'Mild'
+          : severityScore < 76
+            ? 'Moderate'
+            : 'Severe'
+  const severityTextColor =
+    severityScore === 0
+      ? 'text-gray-400'
+      : severityScore < 34
+        ? 'text-green-600'
+        : severityScore < 67
+          ? 'text-amber-600'
+          : 'text-red-600'
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-900">Live Monitor</h1>
-      <p className="mt-1 text-sm text-gray-500">Real-time facial and hand landmark detection via webcam.</p>
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Live Monitor</h1>
+        <p className="mt-1 text-sm text-gray-500">Real-time tic detection via webcam.</p>
+      </div>
 
-      <div className="mt-6">
+      <div className="flex items-center gap-3 flex-wrap">
         <button
           onClick={isRunning ? stopCamera : startCamera}
           className={`px-4 py-2 rounded-md text-sm font-medium text-white transition-colors ${
@@ -341,10 +386,7 @@ export default function LiveMonitor() {
         >
           {isRunning ? 'Stop Camera' : 'Start Camera'}
         </button>
-      </div>
-
-      {isRunning && (
-        <div className="mt-3 flex items-center gap-3 flex-wrap">
+        {isRunning && (
           <button
             onClick={isRecording ? stopRecording : startRecording}
             className={`px-4 py-2 rounded-md text-sm font-medium text-white transition-colors ${
@@ -353,87 +395,122 @@ export default function LiveMonitor() {
           >
             {isRecording ? 'Stop Recording' : 'Start Recording'}
           </button>
-          {isRecording && (
-            <span className="text-sm font-mono text-red-400">
-              ● REC {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:
-              {String(recordingSeconds % 60).padStart(2, '0')}
-            </span>
-          )}
-          {isRecording && (
-            <button
-              onClick={tagManualTic}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                tagFlash
-                  ? 'bg-yellow-400 text-yellow-900'
-                  : 'bg-yellow-500 hover:bg-yellow-600 text-white'
-              }`}
-            >
-              {tagFlash ? 'Tagged!' : 'Tag Tic Now'}
-            </button>
-          )}
-          {isRecording && (
-            <span className="text-xs text-gray-400">or press Space</span>
-          )}
-          {isRecording && manualTagCount > 0 && (
-            <span className="text-xs text-yellow-600 font-mono">{manualTagCount} manual</span>
-          )}
-        </div>
-      )}
-
-      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-
-      {/* Always mounted so refs are stable when startCamera() is called */}
-      <div
-        className="relative mt-4 inline-block rounded-lg overflow-hidden"
-        style={{ display: isRunning ? 'inline-block' : 'none' }}
-      >
-        <video ref={videoRef} className="block" playsInline muted />
-        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
+        )}
+        {isRecording && (
+          <span className="text-sm font-mono text-red-400">
+            ● REC {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:
+            {String(recordingSeconds % 60).padStart(2, '0')}
+          </span>
+        )}
+        {isRecording && (
+          <button
+            onClick={tagManualTic}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              tagFlash ? 'bg-yellow-400 text-yellow-900' : 'bg-yellow-500 hover:bg-yellow-600 text-white'
+            }`}
+          >
+            {tagFlash ? 'Tagged!' : 'Tag Tic Now'}
+          </button>
+        )}
+        {isRecording && <span className="text-xs text-gray-400">or press Space</span>}
+        {isRecording && manualTagCount > 0 && (
+          <span className="text-xs text-yellow-600 font-mono">{manualTagCount} manual</span>
+        )}
       </div>
 
-      {isRunning && latestMetrics && (
-        <p className="text-xs text-gray-400 font-mono mt-2">
-          Face vel: {vel(latestMetrics.face?.velocity)}&nbsp;&nbsp;Mouth vel:{' '}
-          {vel(latestMetrics.mouth?.velocity)}&nbsp;&nbsp;L-Hand vel:{' '}
-          {vel(latestMetrics.leftHand?.velocity)}&nbsp;&nbsp;R-Hand vel:{' '}
-          {vel(latestMetrics.rightHand?.velocity)}
-        </p>
-      )}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
-      {isRunning && (
-        <div className="mt-2 text-xs font-mono text-yellow-400">
-          <div>Recent mouth tics:</div>
-          {recentTics.length === 0 ? (
-            <div className="text-gray-500">No tics detected</div>
-          ) : (
-            recentTics.map((t, i) => (
-              <div key={i}>
-                {new Date(t.timestamp).toISOString().slice(11, 23)}
-                {'  '}disp: {t.displacement.toFixed(4)}
-                {'  '}conf: {t.confidence.toFixed(2)}
-              </div>
-            ))
-          )}
+      {/* Always mounted so video/canvas refs are stable; outer div hidden when camera is off */}
+      <div className="flex gap-6 items-start" style={{ display: isRunning ? undefined : 'none' }}>
+        {/* Camera feed — left column */}
+        <div className="flex-[3] min-w-0">
+          <div className="relative rounded-lg overflow-hidden bg-black">
+            <video ref={videoRef} className="w-full block" playsInline muted />
+            <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
+          </div>
         </div>
-      )}
 
-      {isRunning && (
-        <div className="mt-2 text-xs font-mono text-blue-400">
-          <div>Recent hand tics:</div>
-          {recentHandTics.length === 0 ? (
-            <div className="text-gray-500">No tics detected</div>
-          ) : (
-            recentHandTics.map((t, i) => (
-              <div key={i}>
-                {new Date(t.timestamp).toISOString().slice(11, 23)}
-                {'  '}{t.hand}-hand
-                {'  '}reps: {t.repetitionCount}
-                {'  '}conf: {t.confidence.toFixed(2)}
+        {/* Stats panel — right column */}
+        <div className="flex-[2] min-w-0 space-y-3">
+          {/* Severity gauge */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Severity Score</p>
+            <svg viewBox="0 0 100 56" className="w-full max-w-[160px] mx-auto">
+              <path
+                d="M 10 50 A 40 40 0 0 1 90 50"
+                fill="none"
+                stroke="#e5e7eb"
+                strokeWidth="8"
+                strokeLinecap="round"
+              />
+              <path
+                d="M 10 50 A 40 40 0 0 1 90 50"
+                fill="none"
+                stroke={gaugeColor}
+                strokeWidth="8"
+                strokeLinecap="round"
+                strokeDasharray={`${GAUGE_ARC_LENGTH}`}
+                strokeDashoffset={`${GAUGE_ARC_LENGTH * (1 - severityScore / 100)}`}
+              />
+            </svg>
+            <p className="text-4xl font-bold text-gray-900 -mt-1">{severityScore}</p>
+            <p className={`text-sm font-medium mt-0.5 ${severityTextColor}`}>{severityLabel}</p>
+          </div>
+
+          {/* Metric cards */}
+          <div className="grid grid-cols-2 gap-2">
+            {(
+              [
+                { label: 'Mouth Tics', value: String(mouthCount) },
+                { label: 'Hand Tics', value: String(handCount) },
+                { label: 'Manual Tags', value: String(manualTagCount) },
+                { label: 'Avg Confidence', value: totalCount > 0 ? `${Math.round(avgConf * 100)}%` : '—' },
+              ] as const
+            ).map(({ label, value }) => (
+              <div key={label} className="bg-white rounded-lg border border-gray-200 p-3 text-center">
+                <p className="text-2xl font-bold text-gray-900">{value}</p>
+                <p className="text-xs text-gray-500 mt-1">{label}</p>
               </div>
-            ))
-          )}
+            ))}
+          </div>
+
+          {/* Event log */}
+          <div className="bg-white rounded-lg border border-gray-200">
+            <div className="px-3 py-2 border-b border-gray-100">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Event Log</p>
+            </div>
+            <div className="h-48 overflow-y-auto p-2 space-y-0.5">
+              {sessionEvents.length === 0 ? (
+                <p className="text-xs text-gray-400 p-1">
+                  {isRecording ? 'Waiting for events…' : 'Start recording to see events'}
+                </p>
+              ) : (
+                [...sessionEvents].reverse().map((e, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs font-mono">
+                    <span className="text-gray-400 flex-shrink-0">
+                      {new Date(e.timestamp).toISOString().slice(11, 19)}
+                    </span>
+                    <span
+                      className={`flex-shrink-0 font-semibold ${
+                        e.tic_type === 'mouth'
+                          ? 'text-yellow-600'
+                          : e.tic_type === 'hand'
+                            ? 'text-blue-600'
+                            : e.tic_type === 'manual'
+                              ? 'text-purple-600'
+                              : 'text-gray-600'
+                      }`}
+                    >
+                      {e.tic_type}
+                    </span>
+                    <span className="text-gray-400">{e.confidence.toFixed(2)}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   )
 }
