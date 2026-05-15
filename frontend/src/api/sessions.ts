@@ -4,7 +4,7 @@ const BASE = '/api/v1/video_analysis/sessions'
 
 export interface TicEventPayload {
   timestamp: string
-  tic_type: 'mouth' | 'hand' | 'face' | 'body'
+  tic_type: 'mouth' | 'hand' | 'face' | 'body' | 'manual'
   confidence: number
 }
 
@@ -37,7 +37,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
 
 export interface TicEventRecord {
   timestamp: string
-  tic_type: 'mouth' | 'hand' | 'face' | 'body'
+  tic_type: 'mouth' | 'hand' | 'face' | 'body' | 'manual'
   confidence: number
   confirmation: 'confirmed' | 'rejected' | null
   annotation: string
