@@ -193,7 +193,7 @@ export default function SessionDetailPage() {
           <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Video</div>
           <video
             ref={videoRef}
-            src={`/api/v1/video_analysis/sessions/${session.session_id}/video`}
+            src={`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'}/api/v1/video_analysis/sessions/${session.session_id}/video`}
             controls
             className="w-full rounded-lg border border-gray-200 bg-black max-h-80"
           />
