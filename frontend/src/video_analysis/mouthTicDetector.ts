@@ -10,6 +10,7 @@ export interface TicEvent {
 type TicListener = (event: TicEvent) => void
 
 const MIN_VELOCITY = 0.005
+const WINDOW_SIZE = 30
 
 function computeStats(values: number[]): { mean: number; std: number } {
   if (values.length === 0) return { mean: 0, std: 0 }
@@ -26,17 +27,45 @@ export class MouthTicDetector {
   private inCandidate = false
   private candidateStartTime = 0
   private peakVelocity = 0
+  private prevNormalizedLipGap: number | null = null
+  private readonly velocityWindow: number[] = []
 
   constructor(pipeline: LandmarkPipeline, options?: { sigmaThreshold?: number }) {
     this.sigmaThreshold = options?.sigmaThreshold ?? 2.0
-    this.unsubscribe = pipeline.subscribe((metrics) => this.process(metrics, pipeline))
+    this.unsubscribe = pipeline.subscribe((metrics) => this.process(metrics))
   }
 
-  private process(metrics: FrameMetrics, pipeline: LandmarkPipeline): void {
-    const mouthVelocity = metrics.mouth?.velocity ?? 0
-    const window = pipeline.getWindow()
-    const velocities = window.map((f) => f.mouth?.velocity ?? 0)
-    const { mean, std } = computeStats(velocities)
+  private process(metrics: FrameMetrics): void {
+    const faceLandmarks = metrics.face?.landmarks
+    if (!faceLandmarks || faceLandmarks.length <= 263) {
+      this.prevNormalizedLipGap = null
+      return
+    }
+
+    const upperLip = faceLandmarks[13]
+    const lowerLip = faceLandmarks[14]
+    const leftEye = faceLandmarks[33]
+    const rightEye = faceLandmarks[263]
+
+    const lipGap = Math.hypot(upperLip.x - lowerLip.x, upperLip.y - lowerLip.y)
+    const interOcular = Math.hypot(rightEye.x - leftEye.x, rightEye.y - leftEye.y)
+
+    if (interOcular === 0) {
+      this.prevNormalizedLipGap = null
+      return
+    }
+
+    const normalizedLipGap = lipGap / interOcular
+    const mouthVelocity =
+      this.prevNormalizedLipGap !== null
+        ? Math.abs(normalizedLipGap - this.prevNormalizedLipGap)
+        : 0
+    this.prevNormalizedLipGap = normalizedLipGap
+
+    this.velocityWindow.push(mouthVelocity)
+    if (this.velocityWindow.length > WINDOW_SIZE) this.velocityWindow.shift()
+
+    const { mean, std } = computeStats(this.velocityWindow)
     const threshold = mean + this.sigmaThreshold * std
 
     if (!this.inCandidate) {

@@ -12,10 +12,10 @@ import mediapipe as mp
 
 from backend.video_analysis.domain.session import TicEvent, TicType
 
-MOUTH_INDICES = {
-    61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146,
-    78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95,
-}
+_UPPER_LIP_IDX = 13
+_LOWER_LIP_IDX = 14
+_LEFT_EYE_IDX = 33
+_RIGHT_EYE_IDX = 263
 
 _SIGMA_THRESHOLD = 2.0
 _MIN_MOUTH_VELOCITY = 0.005
@@ -107,7 +107,7 @@ def analyze_video(video_bytes: bytes, session_id: UUID, started_at: datetime) ->
         mouth_in_candidate = False
         mouth_candidate_start_ms = 0.0
         mouth_peak_velocity = 0.0
-        prev_mouth_centroid: tuple[float, float, float] | None = None
+        prev_normalized_lip_gap: float | None = None
 
         left_bursts: list[dict[str, float]] = []
         right_bursts: list[dict[str, float]] = []
@@ -128,43 +128,55 @@ def analyze_video(video_bytes: bytes, session_id: UUID, started_at: datetime) ->
             frame_time = started_at + timedelta(milliseconds=frame_ms)
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            # Mouth detection — mirrors mouthTicDetector.ts logic
+            # Mouth detection — normalized lip gap velocity to exclude rigid head motion
             face_result = face_mesh.process(rgb)
             if face_result.multi_face_landmarks:
                 fl = list(face_result.multi_face_landmarks[0].landmark)
-                mouth_pts = [fl[i] for i in sorted(MOUTH_INDICES) if i < len(fl)]
-                if mouth_pts:
-                    mc = _centroid(mouth_pts)
-                    mouth_velocity = _dist3(mc, prev_mouth_centroid) if prev_mouth_centroid is not None else 0.0
-                    prev_mouth_centroid = mc
-                    mouth_window.append(mouth_velocity)
+                if len(fl) > _RIGHT_EYE_IDX:
+                    inter_ocular = math.hypot(
+                        fl[_RIGHT_EYE_IDX].x - fl[_LEFT_EYE_IDX].x,
+                        fl[_RIGHT_EYE_IDX].y - fl[_LEFT_EYE_IDX].y,
+                    )
+                    if inter_ocular > 0:
+                        lip_gap = math.hypot(
+                            fl[_UPPER_LIP_IDX].x - fl[_LOWER_LIP_IDX].x,
+                            fl[_UPPER_LIP_IDX].y - fl[_LOWER_LIP_IDX].y,
+                        )
+                        normalized_lip_gap = lip_gap / inter_ocular
+                        mouth_velocity = (
+                            abs(normalized_lip_gap - prev_normalized_lip_gap)
+                            if prev_normalized_lip_gap is not None
+                            else 0.0
+                        )
+                        prev_normalized_lip_gap = normalized_lip_gap
+                        mouth_window.append(mouth_velocity)
 
-                    win = list(mouth_window)
-                    mean, std = _compute_stats(win)
-                    threshold = mean + _SIGMA_THRESHOLD * std
+                        win = list(mouth_window)
+                        mean, std = _compute_stats(win)
+                        threshold = mean + _SIGMA_THRESHOLD * std
 
-                    if not mouth_in_candidate:
-                        if mouth_velocity > threshold and threshold > 0 and mouth_velocity > _MIN_MOUTH_VELOCITY:
-                            mouth_in_candidate = True
-                            mouth_candidate_start_ms = frame_ms
-                            mouth_peak_velocity = mouth_velocity
-                    else:
-                        if mouth_velocity > mouth_peak_velocity:
-                            mouth_peak_velocity = mouth_velocity
-                        if mouth_velocity <= threshold:
-                            duration = frame_ms - mouth_candidate_start_ms
-                            if duration < 500:
-                                sigma_scaled = _SIGMA_THRESHOLD * std + 1e-9
-                                confidence = min(1.0, (mouth_peak_velocity - mean) / sigma_scaled / 3)
-                                events.append(TicEvent(
-                                    timestamp=frame_time,
-                                    tic_type=TicType.mouth,
-                                    confidence=confidence,
-                                ))
-                            mouth_in_candidate = False
-                            mouth_peak_velocity = 0.0
+                        if not mouth_in_candidate:
+                            if mouth_velocity > threshold and threshold > 0 and mouth_velocity > _MIN_MOUTH_VELOCITY:
+                                mouth_in_candidate = True
+                                mouth_candidate_start_ms = frame_ms
+                                mouth_peak_velocity = mouth_velocity
+                        else:
+                            if mouth_velocity > mouth_peak_velocity:
+                                mouth_peak_velocity = mouth_velocity
+                            if mouth_velocity <= threshold:
+                                duration = frame_ms - mouth_candidate_start_ms
+                                if duration < 500:
+                                    sigma_scaled = _SIGMA_THRESHOLD * std + 1e-9
+                                    confidence = min(1.0, (mouth_peak_velocity - mean) / sigma_scaled / 3)
+                                    events.append(TicEvent(
+                                        timestamp=frame_time,
+                                        tic_type=TicType.mouth,
+                                        confidence=confidence,
+                                    ))
+                                mouth_in_candidate = False
+                                mouth_peak_velocity = 0.0
             else:
-                prev_mouth_centroid = None
+                prev_normalized_lip_gap = None
 
             # Hand detection — mirrors handTicDetector.ts burst-repetition logic
             hand_result = hands_mp.process(rgb)
