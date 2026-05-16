@@ -50,6 +50,8 @@ export default function SessionDetailPage() {
   const [bulkError, setBulkError] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [activeEventIdx, setActiveEventIdx] = useState<number | null>(null)
+  const [videoDuration, setVideoDuration] = useState(0)
+  const [playheadPct, setPlayheadPct] = useState(0)
 
   useEffect(() => {
     if (!sessionId) return
@@ -196,7 +198,37 @@ export default function SessionDetailPage() {
             src={`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'}/api/v1/video_analysis/sessions/${session.session_id}/video`}
             controls
             className="w-full rounded-lg border border-gray-200 bg-black max-h-80"
+            onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)}
+            onTimeUpdate={(e) => {
+              if (videoDuration > 0) setPlayheadPct((e.currentTarget.currentTime / videoDuration) * 100)
+            }}
           />
+          {videoDuration > 0 && (
+            <div className="relative w-full h-6 bg-gray-800 rounded mt-2 overflow-hidden">
+              <div
+                className="absolute top-0 h-full w-0.5 bg-white opacity-70 pointer-events-none"
+                style={{ left: `${playheadPct}%` }}
+              />
+              {session.events.map((evt, i) => {
+                const offsetSec = Math.max(
+                  0,
+                  (new Date(evt.timestamp).getTime() - new Date(session.started_at).getTime()) / 1000,
+                )
+                const pct = Math.min(Math.max((offsetSec / videoDuration) * 100, 0), 99)
+                const m = Math.floor(offsetSec / 60)
+                const s = String(Math.floor(offsetSec % 60)).padStart(2, '0')
+                return (
+                  <button
+                    key={i}
+                    title={`${evt.tic_type} — ${m}:${s}`}
+                    onClick={() => seekToEvent(i)}
+                    className="absolute top-1 -translate-x-1/2 w-2 h-4 rounded-sm bg-yellow-400 hover:bg-yellow-300 focus:outline-none"
+                    style={{ left: `${pct}%` }}
+                  />
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
